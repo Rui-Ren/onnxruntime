@@ -19,7 +19,8 @@ namespace onnxruntime {
 namespace cuda {
 
 // float16 arithmetic is supported after sm5.3 with intrinsics, and cuda does not provide fallback for lower versions
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 530
+// CUDA 12.2 does not limit the definition based on sm53 anymore and defines for all arches
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 530) && ((__CUDACC_VER_MAJOR__ < 12) || ((__CUDACC_VER_MAJOR__ == 12) && (__CUDACC_VER_MINOR__ < 2)))
 __device__ __forceinline__ half operator+(const half& lh, const half& rh) { return half((float)lh + (float)rh); }
 __device__ __forceinline__ half operator-(const half& lh, const half& rh) { return half((float)lh - (float)rh); }
 __device__ __forceinline__ half operator*(const half& lh, const half& rh) { return half((float)lh * (float)rh); }
@@ -146,20 +147,20 @@ __device__ __forceinline__ BFloat16& operator/=(BFloat16& a, const BFloat16& b) 
 
 /// Arithmetic with floats
 
-__device__ __forceinline__ float operator+(BFloat16 a, float b) { return static_cast<float>(a) + b; }
-__device__ __forceinline__ float operator-(BFloat16 a, float b) { return static_cast<float>(a) - b; }
-__device__ __forceinline__ float operator*(BFloat16 a, float b) { return static_cast<float>(a) * b; }
-__device__ __forceinline__ float operator/(BFloat16 a, float b) { return static_cast<float>(a) / b; }
+__device__ __forceinline__ float operator+(BFloat16 a, float b) { return a + b; }
+__device__ __forceinline__ float operator-(BFloat16 a, float b) { return a - b; }
+__device__ __forceinline__ float operator*(BFloat16 a, float b) { return a * b; }
+__device__ __forceinline__ float operator/(BFloat16 a, float b) { return a / b; }
 
-__device__ __forceinline__ float operator+(float a, BFloat16 b) { return a + static_cast<float>(b); }
-__device__ __forceinline__ float operator-(float a, BFloat16 b) { return a - static_cast<float>(b); }
-__device__ __forceinline__ float operator*(float a, BFloat16 b) { return a * static_cast<float>(b); }
-__device__ __forceinline__ float operator/(float a, BFloat16 b) { return a / static_cast<float>(b); }
+__device__ __forceinline__ float operator+(float a, BFloat16 b) { return a + b; }
+__device__ __forceinline__ float operator-(float a, BFloat16 b) { return a - b; }
+__device__ __forceinline__ float operator*(float a, BFloat16 b) { return a * b; }
+__device__ __forceinline__ float operator/(float a, BFloat16 b) { return a / b; }
 
-__device__ __forceinline__ float& operator+=(float& a, const BFloat16& b) { return a += static_cast<float>(b); }
-__device__ __forceinline__ float& operator-=(float& a, const BFloat16& b) { return a -= static_cast<float>(b); }
-__device__ __forceinline__ float& operator*=(float& a, const BFloat16& b) { return a *= static_cast<float>(b); }
-__device__ __forceinline__ float& operator/=(float& a, const BFloat16& b) { return a /= static_cast<float>(b); }
+__device__ __forceinline__ float& operator+=(float& a, const BFloat16& b) { return a += b; }
+__device__ __forceinline__ float& operator-=(float& a, const BFloat16& b) { return a -= b; }
+__device__ __forceinline__ float& operator*=(float& a, const BFloat16& b) { return a *= b; }
+__device__ __forceinline__ float& operator/=(float& a, const BFloat16& b) { return a /= b; }
 
 /// Arithmetic with doubles
 
@@ -349,6 +350,18 @@ __device__ __inline__ T _Max(T a, T b) { return a > b ? a : b; }
 
 template <typename T>
 __device__ __inline__ T _Abs(T a) { return a > (T)0 ? a : -a; }
+
+template <typename T>
+__device__ __inline__ T _Signum(T a, std::false_type /* is_signed */) { return T(0) < a; }
+
+template <typename T>
+__device__ __inline__ T _Signum(T a, std::true_type /* is_signed */) { return (T(0) < a) - (a < T(0)); }
+
+template <typename T>
+__device__ __inline__ T _Sign(T a) { return _Signum(a, std::is_signed<T>()); }
+
+template <>
+__device__ __inline__ half _Sign(half a) { return _Signum(a, std::true_type()); }
 
 template <typename T>
 __device__ __inline__ T _Normcdf(T a);

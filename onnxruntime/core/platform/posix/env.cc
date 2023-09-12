@@ -193,22 +193,6 @@ class PosixThread : public EnvThread {
       }
 
       size_t stack_size = thread_options.stack_size;
-#if defined(__wasm__)
-      // emscripten 3.1.37 has a bug which does not take build flags 'STACK_SIZE' or 'DEFAULT_PTHREAD_STACK_SIZE'.
-      // the pthread stack size will always be 64kB, which is insufficient to run some kernels.
-      // we set the stack_size to a bigger value
-      //
-      // https://github.com/emscripten-core/emscripten/issues/19302
-      //
-      // TODO: once this issue is fixed by emscripten's new release, remove this code.
-      //       future changes to DEFAULT_PTHREAD_STACK_SIZE will be in the following files
-      //       - cmake/onnxruntime_unittests.cmake (target onnxruntime_test_all)
-      //       - cmake/onnxruntime_webassembly.cmake (target onnxruntime_webassembly)
-      //
-      if (stack_size == 0) {
-        stack_size = 131072;
-      }
-#endif
       if (stack_size > 0) {
         s = pthread_attr_setstacksize(&attr, stack_size);
         if (s != 0) {
@@ -351,7 +335,8 @@ class PosixEnv : public Env {
       sleep_time.tv_nsec = 0;
 
       if (micros >= OneMillion) {
-        sleep_time.tv_sec = std::min<int64_t>(micros / OneMillion, std::numeric_limits<time_t>::max());
+        sleep_time.tv_sec = static_cast<time_t>(std::min<int64_t>(micros / OneMillion,
+                                                                  std::numeric_limits<time_t>::max()));
         micros -= static_cast<int64_t>(sleep_time.tv_sec) * OneMillion;
       }
       if (micros < OneMillion) {
