@@ -35,9 +35,9 @@ bool GatherToSplitFusion::IsSupportedGather(const Graph& graph, const Node& node
 
 /*
 GatherToSplitFusion is to fuse:
-Node -> Gather(index=0, axis=axis)
-    |-> Gather(index=1, axis=axis)
-    |-> Gather(index=2, axis=axis)
+Node -> Gather(data=0, axis=axis)
+    |-> Gather(data=1, axis=axis)
+    |-> Gather(data=2, axis=axis)
     |...
 
 To

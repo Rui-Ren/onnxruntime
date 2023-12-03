@@ -42,6 +42,7 @@
 #include "core/optimizer/expand_elimination.h"
 #include "core/optimizer/fast_gelu_fusion.h"
 #include "core/optimizer/gather_fusion.h"
+#include "core/optimizer/gather_slice_fusion.h"
 #include "core/optimizer/gelu_approximation.h"
 #include "core/optimizer/gelu_fusion.h"
 #include "core/optimizer/gemm_activation_fusion.h"
@@ -7064,6 +7065,9 @@ TEST_F(GraphTransformationTests, GatherToSplitFusion) {
     builder.AddNode("Transpose", {gather_out_1}, {transpose_out_1}).AddAttribute("perm", std::vector<int64_t>{0, 2, 1});
     builder.AddNode("Transpose", {gather_out_2}, {transpose_out_2}).AddAttribute("perm", std::vector<int64_t>{0, 2, 1});
     builder.AddNode("Transpose", {gather_out_3}, {transpose_out_3}).AddAttribute("perm", std::vector<int64_t>{0, 2, 1});
+
+    builder.SaveModel("gather_fuse_test_model.onnx")
+
   };
 
   auto pre_graph_checker = [&](Graph& graph) {
@@ -7623,5 +7627,82 @@ TEST_F(GraphTransformationTests, GatherToSliceFusion) {
   }
 }
 
-}  // namespace test
-}  // namespace onnxruntime
+TEST_F(GraphTransformationTests, GatherSliceToSplit) {
+
+  auto build_test_case = [&] (ModelTestBuilder& builder) {
+
+    // create Reshape op
+    auto* data_arg = builder.MakeInput<float>({{54}});
+    auto* shape_arg = builder.MakeInput<int64_t>({{0, 0, 73, 64}});
+    auto* reshape_out = builder.MakeIntermediate<float>({2, 512, 73, 64});
+    builder.AddNode("Reshape", {data_arg, shape_arg}, {reshape_out});
+
+    // create Gather 1 op
+    auto* gather_index_1 = builder.MakeInitializer<int64_t>({}, {static_cast<int64_t>(-2)});
+    auto* gather_out_1 = builder.MakeIntermediate<float>();
+    builder.AddNode("Gather", {reshape_out, gather_index_1}, gather_out_1)
+      .AddAttribute("axis", static_cast<int64_t>(2));
+    // create Transpose 1 op
+    auto* transpose_out_1 = builder.MakeOutput();
+    builder.AddNode("Transpose", {gather_out_1}, {transpose_out_1})
+      .AddAttribute("perm", std::vector<int64_t>{0, 2, 1, 3});
+
+    // create Gather 2 op
+    auto* gather_index_2 = builder.MakeInitializer<int64_t>({}, {static_cast<int64_t>(-1)});
+    auto* gather_out_2 = builder.MakeIntermediate<float>();
+    builder.AddNode("Gather", {reshape_out, gather_index_2}, gather_out_2)
+      .AddAttribute("axis", static_cast<int64_t>(2));
+    // create Transpose 2 op
+    auto* transpose_out_2 = builder.MakeOutput();
+    builder.AddNode("Transpose", {gather_out_2}, {transpose_out_2})
+      .AddAttribute("perm", std::vector<int64_t>{0, 2, 1, 3});
+
+    // create Slice op
+    auto* slice_output = builder.MakeIntermediate<float>();
+    auto* starts = builder.MakeInitializer<int64_t>({0}, {0});
+    auto* ends   = builder.MakeInitializer<int64_t>({0}, {-2});
+    auto* axes   = builder.MakeInitializer<int64_t>({0}, {2});
+    auto* steps  = builder.MakeInitializer<int64_t>({0}, {1});
+    builder.AddNode("Slice", {reshape_out, starts, ends, axes, steps}, {slice_output});
+
+    // create Shape op
+    auto* shape_output_1 = builder.MakeOutput();
+    auto* shape_output_2 = builder.MakeOutput();
+    auto* transpose_out_3 = builder.MakeOutput();
+
+    builder.AddNode("Shape", {slice_output}, {shape_output_1});
+    builder.AddNode("Shape", {slice_output}, {shape_output_2});
+    builder.AddNode("Transpose", {slice_output}, {transpose_out_3})
+      .AddAttribute("perm", std::vector<int64_t>{0, 2, 1, 3});
+  };
+
+  auto pre_graph_checker = [&](Graph& graph) {ASSERT_EQ(CountOpsInGraph(graph)["Gather"], 2);};
+
+  // OpSet-14
+
+  {
+    auto post_graph_checker = [&](Graph& graph) {
+      ASSERT_EQ(CountOpsInGraph(graph)["Gather"], 0);
+      ASSERT_EQ(CountOpsInGraph(graph)["Slice"], 0);
+      ASSERT_EQ(CountOpsInGraph(graph)["Split"], 1);
+
+      for (auto& node : graph.Nodes()) {
+        if (node.OpType() == "Split") {
+          auto& attrs = node.GetAttributes();
+          ASSERT_TRUE(attrs.find("axis") != attrs.end());
+          ASSERT_EQ(2, static_cast<int>(attrs.at("axis").i()));
+        }
+      }
+    };
+
+    std::unique_ptr<GraphTransformer> transformer = std::make_unique<GatherSliceToSplitFusion>();
+
+    ASSERT_STATUS_OK(TestGraphTransformer(build_test_case, 14, *logger_, std::move(transformer), TransformerLevel::Level1, 1,
+                          pre_graph_checker, post_graph_checker));
+
+  }
+};  // namespace test
+  // namespace onnxruntime
+
+}
+}
