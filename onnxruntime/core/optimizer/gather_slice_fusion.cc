@@ -8,7 +8,8 @@
 
 namespace onnxruntime {
 
-bool GatherSliceToSplitFusion::IsSupportedGather(const Graph& graph, const Node& node, int64_t& index, int64_t& axis, int64_t& indices_n_dims) const {
+bool GatherSliceToSplitFusion::IsSupportedGather(const Graph& graph, const Node& node, int64_t& index, int64_t& axis,
+                                                 int64_t& indices_n_dims) const {
   if (!graph_utils::IsSupportedOptypeVersionAndDomain(node, "Gather", {1, 11, 13}) ||
       !graph_utils::IsSupportedProvider(node, GetCompatibleExecutionProviders())) {
     return false;
@@ -68,10 +69,8 @@ bool GatherSliceToSplitFusion::IsSupportedSlice(const Graph& graph, const Node& 
             return false;
         }
 
-
     } else if (onnx_opset_version > 10) {
         // starts/ends/axes/steps
-
         // return a pointer to the corresponding NodeArg if input of the node at this index exists.
         auto get_input_if_exists = [&node](size_t input_idx) -> const NodeArg* {
             const auto& input_defs = node.InputDefs();
@@ -115,23 +114,19 @@ bool GatherSliceToSplitFusion::IsSupportedSlice(const Graph& graph, const Node& 
             // If axes input exists, it should be constant and of the same size as starts/ends.
             if (get_input_if_exists(3)) {
                 const ONNX_NAMESPACE::TensorProto* axes_init = get_initializer_if_constant(3);
-
                 if (!axes_init || axes_init->dims_size() != 1) ||
                     static_cast<size_t>(axes_init->dims().Get(0) != starts.size()) {
                         return false;
                 };
-
                 axes = get_initializer_data(axes_init);
             }
 
             // If steps input exists
             if (get_input_if_exists(4)) {
                 const ONNX_NAMESPACE::TensorProto* steps_init = get_initializer_if_constant(4);
-
                 if (!steps_init) return false;
                 steps = get_initializer_data(steps_init);
                 if (steps.size() != starts.size()) return false;
-
                 for (int64_t step : steps) {
                     if (step != 1) return false;
                 }
@@ -204,7 +199,6 @@ Status GatherSliceToSplitFusion::ApplyImpl(Graph& graph, bool& modified, int gra
         // TODO: how to catch up the Slice output value
         InlinedVector<NodeArg*> gather_outputs;
         InlinedVector<NodeArg*> slice_outputs;
-
         InlinedVector<std::reference_wrapper<Node>> nodes_to_fuse;
 
         // find the nodes to be merged
@@ -294,7 +288,7 @@ Status GatherSliceToSplitFusion::ApplyImpl(Graph& graph, bool& modified, int gra
         // TODO: Need to combine <gather_output, slice_output> to get newer node.
         Node& split_node =
             graph.AddNode(
-                graph.GenerateNodeArgName("Split"), "Split", "Split for Gather and Slice nodes",
+                graph.GenerateNodeName("Split"), "Split", "Split for Gather and Slice nodes",
                     {graph.GetNodeArg(node_arg->Name())}, gather_outputs, slice_outputs
             );
 
@@ -302,18 +296,14 @@ Status GatherSliceToSplitFusion::ApplyImpl(Graph& graph, bool& modified, int gra
 
         split_node.SetExecutionProviderType(nodes_to_fuse[0].get().GetExecutionProviderType());
 
-
         for (Node& n : nodes_to_fuse) {
             graph_utils::RemoveNodeOutputEdges(graph, n);
             graph.RemoveNode(n.Index());
         }
 
         modified = true;
-
     }
-
     return Status::OK();
-
 }
 
 
